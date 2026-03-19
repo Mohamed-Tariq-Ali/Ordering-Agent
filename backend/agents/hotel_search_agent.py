@@ -10,15 +10,32 @@ Hotels found near {address}:
 {hotels}
 """
 
-HOTEL_NO_LOCATION_PROMPT = """You are a hotel search assistant.
-The user wants to search for hotels but hasn't shared their location yet.
-Ask them to click the 📍 location button or type a city/area name like "hotels in Guindy".
+NO_RESULTS_PROMPT = """You are a helpful hotel search agent.
+OpenStreetMap has limited hotel data for this area: {address}
+Tell the user honestly that our map database has limited data for this area.
+Then tell them you've prepared search links for them to find hotels.
+Be helpful and warm. Do NOT make up any hotel names.
 """
 
-HOTEL_NO_RESULTS_PROMPT = """You are a hotel search assistant.
-No hotels were found in OpenStreetMap near: {address}.
-Tell the user honestly no results were found and suggest they try a nearby major area.
+NO_LOCATION_PROMPT = """You are a hotel search assistant.
+The user wants to search for hotels but hasn't shared their location yet.
+Ask them to click the 📍 location button or type a city/area like "hotels in Guindy".
 """
+
+
+def _build_google_hotel_url(area: str) -> str:
+    query = area.replace(" ", "+").replace(",", "")
+    return f"https://www.google.com/search?q=hotels+in+{query}"
+
+
+def _build_makemytrip_url(area: str) -> str:
+    city = area.split(",")[0].strip().replace(" ", "-").lower()
+    return f"https://www.makemytrip.com/hotels/{city}-hotels.html"
+
+
+def _build_booking_url(area: str) -> str:
+    query = area.split(",")[0].strip().replace(" ", "+").lower()
+    return f"https://www.booking.com/search.html?ss={query}"
 
 
 async def handle_hotel_search(message: str, conversation_history: list,
@@ -27,6 +44,7 @@ async def handle_hotel_search(message: str, conversation_history: list,
     # Step 1: Check if user mentioned a specific city/area
     search_location = None
     search_address = ""
+    raw_area = ""
 
     location_keywords = ["in ", "near ", "around ", "at ", "for "]
     message_lower = message.lower()
@@ -35,6 +53,7 @@ async def handle_hotel_search(message: str, conversation_history: list,
             idx = message_lower.index(kw) + len(kw)
             candidate = message[idx:].strip().rstrip("?.,!")
             if candidate and len(candidate) > 2:
+                raw_area = candidate
                 geocoded = await geocode_address(candidate + ", India")
                 if geocoded:
                     search_location = geocoded
@@ -46,10 +65,11 @@ async def handle_hotel_search(message: str, conversation_history: list,
         if not user_location:
             history = conversation_history[-4:]
             messages = history + [{"role": "user", "content": message}]
-            reply = chat_completion(messages, HOTEL_NO_LOCATION_PROMPT, temperature=0.4)
+            reply = chat_completion(messages, NO_LOCATION_PROMPT, temperature=0.4)
             return reply, []
         search_location = user_location
         search_address = user_location.get("address", "your location")
+        raw_area = search_address.split(",")[0].strip()
 
     lat = search_location["lat"]
     lng = search_location["lng"]
@@ -57,42 +77,47 @@ async def handle_hotel_search(message: str, conversation_history: list,
     # Step 3: Fetch hotels from OSM
     hotels = await search_nearby_hotels(lat, lng, radius=5000)
 
+    # Step 4: If OSM returns nothing — give dynamic booking links
     if not hotels:
-        system = HOTEL_NO_RESULTS_PROMPT.format(address=search_address)
-        reply = chat_completion(
-            [{"role": "user", "content": message}],
-            system, temperature=0.4
+        # Use full formatted address for context — fully dynamic, no hardcoded city
+        context = search_address if search_address else raw_area
+        area_label = raw_area if raw_area else search_address.split(",")[0].strip()
+
+        google_url     = _build_google_hotel_url(context)
+        makemytrip_url = _build_makemytrip_url(context)
+        booking_url    = _build_booking_url(context)
+
+        reply = (
+            f"Our map database has limited hotel data for **{area_label}**. "
+            f"Here are direct links to find hotels there:\n\n"
+            f"🔍 [Search on Google]({google_url})\n"
+            f"🏨 [MakeMyTrip]({makemytrip_url})\n"
+            f"🌐 [Booking.com]({booking_url})\n\n"
+            f"Would you like me to search a nearby area instead? "
+            f"Try **Anna Nagar**, **T Nagar**, or **Nungambakkam**."
         )
         return reply, []
 
-    # Step 4: Enrich each hotel
+    # Step 5: Enrich addresses for hotels showing "Nearby"
     origin_lat = user_location["lat"] if user_location else lat
     origin_lng = user_location["lng"] if user_location else lng
 
     for hotel in hotels:
-        # Add directions URL
         hotel["directions_url"] = get_directions_url(
             origin_lat, origin_lng, hotel["lat"], hotel["lng"]
         )
-
-        # Add Google search link so user can look up more info
         hotel["google_search_url"] = (
             f"https://www.google.com/search?q="
-            f"{hotel['name'].replace(' ', '+')}+hotel+Chennai"
+            f"{hotel['name'].replace(' ', '+')}+hotel"
         )
-
-        # If address is missing, build one from coordinates using reverse geocode
         if not hotel["address"] or hotel["address"] == "Nearby":
             from backend.utils.maps import reverse_geocode
             addr = await reverse_geocode(hotel["lat"], hotel["lng"])
             if addr:
-                # Shorten long OSM addresses — take first 2 parts
                 parts = addr.split(",")
                 hotel["address"] = ", ".join(parts[:3]).strip()
-            else:
-                hotel["address"] = f"{hotel['lat']:.4f}, {hotel['lng']:.4f}"
 
-    # Step 5: Build clean text — skip N/A fields
+    # Step 6: Build text from real data only
     def hotel_line(i, h):
         parts = [f"{i+1}. **{h['name']}**"]
         if h["rating"] and h["rating"] != "N/A":
@@ -110,7 +135,6 @@ async def handle_hotel_search(message: str, conversation_history: list,
 
     hotels_text = "\n".join([hotel_line(i, h) for i, h in enumerate(hotels)])
 
-    # Step 6: LLM formats the response
     history = conversation_history[-4:]
     messages = history + [{"role": "user", "content": message}]
     system = HOTEL_SEARCH_SYSTEM_PROMPT.format(
@@ -118,5 +142,4 @@ async def handle_hotel_search(message: str, conversation_history: list,
         address=search_address
     )
     reply = chat_completion(messages, system, temperature=0.3)
-
     return reply, hotels

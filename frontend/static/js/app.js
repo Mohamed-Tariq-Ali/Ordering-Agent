@@ -4,6 +4,7 @@ let conversationHistory = [];
 let isWaiting = false;
 let userLocation = null;
 let selectedRestaurant = null;
+let selectedHotel = null;
 
 // ─── DOM refs ─────────────────────────────────────────────
 const chatMessages    = document.getElementById('chatMessages');
@@ -29,7 +30,7 @@ const closeHistory    = document.getElementById('closeHistory');
 // ─── Init ─────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   addBotMessage(
-    "👋 Hey! I'm **OrderBot** — your smart assistant.\n\nI can help you:\n• 🛍️ Browse & order products\n• 🍽️ Find nearby restaurants & order food\n• 🏨 Search hotels near you\n• 📦 Track or cancel orders\n• 🧾 View order history\n\nTip: Click **📍** to share your location!",
+    "👋 Hey! I'm **OrderBot** — your smart assistant.\n\nI can help you:\n• 🛍️ Browse & order products\n• 🍽️ Find nearby restaurants & order food\n• 🏨 Search & book hotel rooms\n• 📦 Track or cancel orders\n• 🧾 View order history\n\nTip: Click **📍** to share your location!",
     "greeting"
   );
 });
@@ -90,7 +91,7 @@ function requestLocation() {
 getLocationBtn.addEventListener('click', requestLocation);
 locIconBtn.addEventListener('click', requestLocation);
 
-// ─── Quick buttons (only ones with data-msg) ──────────────
+// ─── Quick buttons ────────────────────────────────────────
 document.querySelectorAll('.quick-btn[data-msg]').forEach(btn => {
   btn.addEventListener('click', () => {
     const msg = btn.getAttribute('data-msg');
@@ -107,37 +108,65 @@ historyBtn.addEventListener('click', async () => {
   historyBody.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:4px">Loading...</p>';
   historyPanel.style.display = 'flex';
   try {
-    const resp = await fetch('/api/orders');
-    const orders = await resp.json();
-    renderHistoryPanel(orders);
+    const [ordersResp, bookingsResp] = await Promise.all([
+      fetch('/api/orders'),
+      fetch('/api/hotel-bookings')
+    ]);
+    const orders   = await ordersResp.json();
+    const bookings = await bookingsResp.json();
+    renderHistoryPanel(orders, bookings);
   } catch (e) {
-    historyBody.innerHTML = '<p style="color:var(--danger);font-size:12px;padding:4px">Failed to load orders.</p>';
+    historyBody.innerHTML = '<p style="color:var(--danger);font-size:12px;padding:4px">Failed to load history.</p>';
   }
 });
 
-closeHistory.addEventListener('click', () => {
-  historyPanel.style.display = 'none';
-});
+closeHistory.addEventListener('click', () => { historyPanel.style.display = 'none'; });
 
-function renderHistoryPanel(orders) {
-  if (!orders || orders.length === 0) {
-    historyBody.innerHTML = '<p style="color:var(--text-muted);font-size:13px;padding:4px">No orders placed yet.</p>';
-    return;
+function renderHistoryPanel(orders, bookings = []) {
+  let html = '';
+
+  if (orders && orders.length > 0) {
+    html += `<p class="history-section-label">🛍️ Orders</p>`;
+    html += orders.map(o => {
+      const statusClass = `history-status-${o.status}`;
+      const items = o.items.map(i => `${i.product_name} ×${i.quantity}`).join(', ');
+      const time = o.created_at.slice(0, 16).replace('T', ' ');
+      const type = o.notes && o.notes.includes('Delivery from') ? '🍽️' : '🛍️';
+      return `
+        <div class="history-item">
+          <div class="history-item-id">${type} ${o.order_id}</div>
+          <div class="history-item-meta">
+            <span class="${statusClass}">● ${o.status.toUpperCase()}</span><br>
+            ${items}<br>
+            ₹${o.total_amount} · ${time}
+          </div>
+        </div>`;
+    }).join('');
   }
-  historyBody.innerHTML = orders.map(o => {
-    const statusClass = `history-status-${o.status}`;
-    const items = o.items.map(i => `${i.product_name} ×${i.quantity}`).join(', ');
-    const time = o.created_at.slice(0, 16).replace('T', ' ');
-    return `
-      <div class="history-item">
-        <div class="history-item-id">${o.order_id}</div>
-        <div class="history-item-meta">
-          <span class="${statusClass}">● ${o.status.toUpperCase()}</span><br>
-          ${items}<br>
-          ₹${o.total_amount} · ${time}
-        </div>
-      </div>`;
-  }).join('');
+
+  if (bookings && bookings.length > 0) {
+    html += `<p class="history-section-label">🏨 Hotel Bookings</p>`;
+    html += bookings.map(b => {
+      const statusClass = `history-status-${b.status}`;
+      return `
+        <div class="history-item">
+          <div class="history-item-id">🏨 ${b.booking_id}</div>
+          <div class="history-item-meta">
+            <span class="${statusClass}">● ${b.status.toUpperCase()}</span><br>
+            ${b.hotel_name}<br>
+            ${b.check_in} → ${b.check_out} · ${b.total_nights} night(s)<br>
+            ${b.guests} guest(s) · ${b.room_type}<br>
+            ₹${b.estimated_price}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  if (!html) {
+    html = '<p style="color:var(--text-muted);font-size:13px;padding:4px">No history yet.</p>';
+  }
+
+  historyBody.innerHTML = html;
 }
 
 // ─── Input events ─────────────────────────────────────────
@@ -176,7 +205,8 @@ async function sendMessage() {
         session_id: SESSION_ID,
         conversation_history: conversationHistory.slice(-12),
         location: userLocation,
-        selected_restaurant: selectedRestaurant
+        selected_restaurant: selectedRestaurant,
+        selected_hotel: selectedHotel
       })
     });
 
@@ -198,10 +228,14 @@ async function sendMessage() {
       mapPanel.style.display = 'block';
     }
     if (data.order) showOrderCard(data.order);
-    if (data.orders_list) {
-      renderHistoryPanel(data.orders_list);
-      historyPanel.style.display = 'flex';
-    }
+    if (data.hotel_booking) showHotelBookingCard(data.hotel_booking);
+    if (data.orders_list || data.hotel_bookings_list) {
+  renderHistoryPanel(
+    data.orders_list || [],
+    data.hotel_bookings_list || []
+  );
+  historyPanel.style.display = 'flex';
+}
 
   } catch (err) {
     typingEl.remove();
@@ -281,7 +315,7 @@ function showHotelCards(hotels) {
   const container = document.createElement('div');
   container.className = 'result-cards';
 
-  hotels.forEach((h) => {
+  hotels.forEach((h, i) => {
     const card = document.createElement('div');
     card.className = 'result-card';
     const metaParts = [];
@@ -294,8 +328,9 @@ function showHotelCards(hotels) {
       <div class="rc-name">${escapeHtml(h.name)}</div>
       <div class="rc-meta">${metaParts.map(p => `<span>${escapeHtml(p)}</span>`).join('')}</div>
       <div class="rc-actions">
+        <button class="rc-btn primary select-hotel" data-index="${i}">🏨 Book a Room</button>
         ${h.directions_url ? `<a class="rc-btn" href="${h.directions_url}" target="_blank">🗺️ Directions</a>` : ''}
-        ${h.google_search_url ? `<a class="rc-btn primary" href="${h.google_search_url}" target="_blank">🔍 Google</a>` : ''}
+        ${h.google_search_url ? `<a class="rc-btn" href="${h.google_search_url}" target="_blank">🔍 Google</a>` : ''}
         ${h.website ? `<a class="rc-btn" href="${h.website}" target="_blank">🌐 Website</a>` : ''}
       </div>`;
     container.appendChild(card);
@@ -304,6 +339,20 @@ function showHotelCards(hotels) {
   wrapper.appendChild(container);
   chatMessages.appendChild(wrapper);
   scrollToBottom();
+
+  document.querySelectorAll('.select-hotel').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.index);
+      selectedHotel = hotels[idx];
+      document.querySelectorAll('.result-card').forEach(c => c.classList.remove('selected'));
+      e.target.closest('.result-card').classList.add('selected');
+      addBotMessage(
+        `Great! 🏨 You selected **${selectedHotel.name}**.\n\nTo book a room, tell me:\n• Check-in date\n• Check-out date (or number of nights)\n• Number of guests\n• Room type (Standard / Deluxe / Suite)\n\ne.g. "Book a Standard room for 2 nights from tomorrow for 2 guests"`,
+        'hotel_booking'
+      );
+      conversationHistory.push({ role: 'assistant', content: `Hotel selected: ${selectedHotel.name}` });
+    });
+  });
 }
 
 function showOrderCard(order) {
@@ -328,13 +377,39 @@ function showOrderCard(order) {
   orderContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+function showHotelBookingCard(booking) {
+  orderCardBody.innerHTML = `
+    <div><strong>Booking ID:</strong> ${booking.booking_id}</div>
+    <div><strong>Hotel:</strong> ${booking.hotel_name}</div>
+    ${booking.hotel_address ? `<div><strong>Address:</strong> ${booking.hotel_address}</div>` : ''}
+    <div><strong>Status:</strong> ${booking.status}</div>
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+    <div><strong>Room Type:</strong> ${booking.room_type}</div>
+    <div><strong>Check-in:</strong> ${booking.check_in}</div>
+    <div><strong>Check-out:</strong> ${booking.check_out}</div>
+    <div><strong>Nights:</strong> ${booking.total_nights}</div>
+    <div><strong>Guests:</strong> ${booking.guests}</div>
+    <div><strong>Rooms:</strong> ${booking.rooms}</div>
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+    <div><strong>Est. Total:</strong> ₹${booking.estimated_price}</div>
+    <div style="margin-top:6px;font-size:11px;opacity:0.7;color:#facc15">
+      ⚠️ Please contact the hotel to confirm actual availability.
+    </div>
+    <div style="margin-top:4px;font-size:11px;opacity:0.5">${booking.created_at.slice(0,16).replace('T',' ')}</div>`;
+  orderContainer.querySelector('.order-card-header span').textContent = '🏨 Room Booked';
+  orderContainer.style.display = 'block';
+  orderContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function clearChat() {
   chatMessages.innerHTML = '';
   conversationHistory = [];
   selectedRestaurant = null;
+  selectedHotel = null;
   orderContainer.style.display = 'none';
   mapPanel.style.display = 'none';
   historyPanel.style.display = 'none';
+  orderContainer.querySelector('.order-card-header span').textContent = '✅ Order Confirmed';
   addBotMessage("Chat cleared! How can I help you? 😊", "greeting");
 }
 
@@ -375,6 +450,7 @@ function formatMarkdown(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$2" target="_blank" class="rc-btn" style="display:inline-block;margin:4px 4px 4px 0">$1</a>')
     .replace(/^[•\-] (.+)$/gm, '<li>$1</li>')
     .replace(/\n/g, '<br>');
 }

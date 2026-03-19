@@ -1,9 +1,6 @@
 import sqlite3
-import json
-import os
-from datetime import datetime
 
-DB_PATH = "orders.db"  # saved in your project root folder
+DB_PATH = "orders.db"
 
 
 def get_connection():
@@ -13,17 +10,33 @@ def get_connection():
 
 
 def init_db():
-    """Create tables if they don't exist — runs on startup."""
     conn = get_connection()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS orders (
-            order_id    TEXT PRIMARY KEY,
+            order_id      TEXT PRIMARY KEY,
             customer_name TEXT,
-            items       TEXT,
-            total_amount REAL,
-            status      TEXT,
-            created_at  TEXT,
-            notes       TEXT
+            items         TEXT,
+            total_amount  REAL,
+            status        TEXT,
+            created_at    TEXT,
+            notes         TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hotel_bookings (
+            booking_id        TEXT PRIMARY KEY,
+            hotel_name        TEXT,
+            hotel_address     TEXT,
+            check_in          TEXT,
+            check_out         TEXT,
+            guests            INTEGER,
+            rooms             INTEGER,
+            room_type         TEXT,
+            total_nights      INTEGER,
+            estimated_price   REAL,
+            status            TEXT,
+            created_at        TEXT,
+            notes             TEXT
         )
     """)
     conn.commit()
