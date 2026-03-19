@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>OrderBot — Smart Order Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="bot-avatar">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="40" height="40" rx="12" fill="url(#grad)"/>
+          <circle cx="17" cy="18" r="2" fill="white"/>
+          <circle cx="23" cy="18" r="2" fill="white"/>
+          <path d="M16 23c1 1.5 7 1.5 8 0" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+          <defs><linearGradient id="grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#6C63FF"/><stop offset="1" stop-color="#3ECFCF"/>
+          </linearGradient></defs>
+        </svg>
+      </div>
+      <div>
+        <h1 class="bot-name">OrderBot</h1>
+        <span class="bot-status"><span class="status-dot"></span>Online</span>
+      </div>
+    </div>
+
+    <div class="location-panel" id="locationPanel">
+      <p class="nav-label">📍 Your Location</p>
+      <div class="location-display" id="locationDisplay">
+        <span class="loc-text">Not shared yet</span>
+      </div>
+      <button class="loc-btn" id="getLocationBtn">Share My Location</button>
+    </div>
+
+    <nav class="quick-actions">
+      <p class="nav-label">Quick Actions</p>
+      <button class="quick-btn" data-msg="Show me all products">🛍️ Browse Products</button>
+      <button class="quick-btn" data-msg="Book 2 units of Choco">🍫 Order Choco</button>
+      <button class="quick-btn" data-msg="Find restaurants near me">🍽️ Nearby Restaurants</button>
+      <button class="quick-btn" data-msg="Search hotels near me">🏨 Nearby Hotels</button>
+      <button class="quick-btn" data-msg="Check my order status">📦 Track Order</button>
+      <button class="quick-btn" data-msg="I want to cancel my order">❌ Cancel Order</button>
+      <button class="quick-btn" id="historyBtn">🧾 Order History</button>
+    </nav>
+
+    <div class="history-panel" id="historyPanel" style="display:none">
+      <div class="history-header">
+        <span>🧾 Order History</span>
+        <button class="close-history" id="closeHistory">×</button>
+      </div>
+      <div class="history-body" id="historyBody">
+        <p style="color:var(--text-muted);font-size:13px">No orders yet.</p>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <p class="powered-by">Powered by <span>Groq × LLaMA 3</span></p>
+      <p class="agents-info">Multi-Agent · OpenStreetMap</p>
+    </div>
+  </aside>
+
+  <main class="chat-main">
+    <div class="chat-topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" id="menuBtn">☰</button>
+        <span class="chat-title">Chat</span>
+      </div>
+      <button class="clear-btn" id="clearBtn">Clear Chat</button>
+    </div>
+
+    <div class="chat-messages" id="chatMessages"></div>
+
+    <div class="map-panel" id="mapPanel" style="display:none">
+      <div class="map-panel-header">
+        <span>🗺️ Map View</span>
+        <button class="close-map" id="closeMap">×</button>
+      </div>
+      <iframe id="mapIframe" src="" allowfullscreen loading="lazy"></iframe>
+    </div>
+
+    <div class="order-card-container" id="orderCardContainer" style="display:none">
+      <div class="order-card">
+        <div class="order-card-header">
+          <span>✅ Order Confirmed</span>
+          <button class="close-card" id="closeCard">×</button>
+        </div>
+        <div class="order-card-body" id="orderCardBody"></div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="input-wrapper">
+        <button class="loc-icon-btn" id="locIconBtn" title="Share location">📍</button>
+        <textarea id="userInput"
+          placeholder="Type your message... e.g. 'Find restaurants near me'"
+          rows="1" autocomplete="off"></textarea>
+        <button class="send-btn" id="sendBtn">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <p class="input-hint">📍 Share location → search restaurants & hotels · Book products · Track orders</p>
+    </div>
+  </main>
+
+</div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
