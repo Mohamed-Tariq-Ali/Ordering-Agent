@@ -57,6 +57,10 @@ class ChatRequest(BaseModel):
     location: Optional[dict] = None
     selected_restaurant: Optional[dict] = None
     selected_hotel: Optional[dict] = None
+    # INPUT ROLE 5 — client can hint at the active flow (optional, server is authoritative)
+    active_flow: Optional[str] = None
+    # AUTH — set by server from JWT cookie, not trusted from client
+    username: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -71,4 +75,5 @@ class ChatResponse(BaseModel):
     orders_list: Optional[List[dict]] = None
     hotel_booking: Optional[dict] = None
     hotel_bookings_list: Optional[List[dict]] = None
-    
+    # INPUT ROLE debug — visible in API response so you can inspect what was injected
+    input_roles_debug: Optional[dict] = None

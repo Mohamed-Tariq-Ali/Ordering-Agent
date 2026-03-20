@@ -67,16 +67,16 @@ Be friendly and helpful.
 """
 
 
-def save_hotel_booking(booking: HotelBooking) -> HotelBooking:
+def save_hotel_booking(booking: HotelBooking, username: str = None) -> HotelBooking:
     conn = get_connection()
     conn.execute("""
         INSERT OR REPLACE INTO hotel_bookings
-        (booking_id, hotel_name, hotel_address, check_in, check_out,
+        (booking_id, username, hotel_name, hotel_address, check_in, check_out,
          guests, rooms, room_type, total_nights, estimated_price,
          status, created_at, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        booking.booking_id, booking.hotel_name, booking.hotel_address,
+        booking.booking_id, username, booking.hotel_name, booking.hotel_address,
         booking.check_in, booking.check_out, booking.guests, booking.rooms,
         booking.room_type, booking.total_nights, booking.estimated_price,
         booking.status, booking.created_at, booking.notes
@@ -86,33 +86,51 @@ def save_hotel_booking(booking: HotelBooking) -> HotelBooking:
     return booking
 
 
-def get_all_hotel_bookings() -> list[HotelBooking]:
+def get_all_hotel_bookings(username: str = None) -> list[HotelBooking]:
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM hotel_bookings ORDER BY created_at DESC"
-    ).fetchall()
+    if username:
+        rows = conn.execute(
+            "SELECT * FROM hotel_bookings WHERE username = ? ORDER BY created_at DESC",
+            (username,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM hotel_bookings ORDER BY created_at DESC"
+        ).fetchall()
     conn.close()
     return [_row_to_booking(row) for row in rows]
 
 
-def get_hotel_booking(booking_id: str) -> HotelBooking | None:
+def get_hotel_booking(booking_id: str, username: str = None) -> HotelBooking | None:
     conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM hotel_bookings WHERE booking_id = ?", (booking_id,)
-    ).fetchone()
+    if username:
+        row = conn.execute(
+            "SELECT * FROM hotel_bookings WHERE booking_id = ? AND username = ?",
+            (booking_id, username)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM hotel_bookings WHERE booking_id = ?", (booking_id,)
+        ).fetchone()
     conn.close()
     return _row_to_booking(row) if row else None
 
 
-def cancel_hotel_booking(booking_id: str) -> HotelBooking | None:
+def cancel_hotel_booking(booking_id: str, username: str = None) -> HotelBooking | None:
     conn = get_connection()
-    conn.execute(
-        "UPDATE hotel_bookings SET status = 'cancelled' WHERE booking_id = ?",
-        (booking_id,)
-    )
+    if username:
+        conn.execute(
+            "UPDATE hotel_bookings SET status = 'cancelled' WHERE booking_id = ? AND username = ?",
+            (booking_id, username)
+        )
+    else:
+        conn.execute(
+            "UPDATE hotel_bookings SET status = 'cancelled' WHERE booking_id = ?",
+            (booking_id,)
+        )
     conn.commit()
     conn.close()
-    return get_hotel_booking(booking_id)
+    return get_hotel_booking(booking_id, username=username)
 
 
 def _row_to_booking(row) -> HotelBooking:
@@ -134,23 +152,22 @@ def _row_to_booking(row) -> HotelBooking:
 
 
 async def handle_hotel_booking(message: str, conversation_history: list,
-                                selected_hotel: dict | None) -> tuple[str, dict | None]:
+                                selected_hotel: dict | None,
+                                username: str = None) -> tuple[str, dict | None]:
     """Book a hotel room conversationally."""
 
-    # Step 1: No hotel selected yet
     if not selected_hotel:
         history = conversation_history[-4:]
         messages = history + [{"role": "user", "content": message}]
         reply = chat_completion(messages, NO_HOTEL_PROMPT, temperature=0.4)
         return reply, None
 
-    hotel_name = selected_hotel.get("name", "the hotel")
+    hotel_name    = selected_hotel.get("name", "the hotel")
     hotel_address = selected_hotel.get("address", "")
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today    = datetime.now().strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Step 2: Extract booking details via LLM
     extract_prompt = BOOKING_EXTRACT_PROMPT.format(
         message=message,
         hotel_name=hotel_name,
@@ -171,21 +188,18 @@ async def handle_hotel_booking(message: str, conversation_history: list,
     except Exception:
         extracted = None
 
-    # Step 3: Not enough info — ask for details
     if not extracted or not extracted.get("check_in") or not extracted.get("check_out"):
         clarify_prompt = BOOKING_CLARIFY_PROMPT.format(hotel_name=hotel_name)
-        history = conversation_history[-4:]
+        history  = conversation_history[-4:]
         messages = history + [{"role": "user", "content": message}]
-        reply = chat_completion(messages, clarify_prompt, temperature=0.5)
+        reply    = chat_completion(messages, clarify_prompt, temperature=0.5)
         return reply, None
 
-    # Step 4: Calculate price
-    total_nights = int(extracted.get("total_nights", 1))
+    total_nights    = int(extracted.get("total_nights", 1))
     price_per_night = float(extracted.get("estimated_price_per_night", 3000))
-    rooms = int(extracted.get("rooms", 1))
-    total_price = round(total_nights * price_per_night * rooms, 2)
+    rooms           = int(extracted.get("rooms", 1))
+    total_price     = round(total_nights * price_per_night * rooms, 2)
 
-    # Step 5: Create and save booking
     booking = HotelBooking(
         hotel_name=hotel_name,
         hotel_address=hotel_address,
@@ -197,11 +211,10 @@ async def handle_hotel_booking(message: str, conversation_history: list,
         total_nights=total_nights,
         estimated_price=total_price,
         status="confirmed",
-        notes=f"Booked via OrderBot"
+        notes="Booked via OrderBot"
     )
-    save_hotel_booking(booking)
+    save_hotel_booking(booking, username=username)
 
-    # Step 6: Generate confirmation
     booking_summary = f"""
 Booking ID: {booking.booking_id}
 Hotel: {hotel_name}
@@ -217,8 +230,9 @@ Status: Confirmed
 Note: Please contact the hotel to confirm actual room availability.
 """
     confirm_messages = [{"role": "user", "content": f"Hotel booked:\n{booking_summary}\nGenerate warm confirmation."}]
-    reply = chat_completion(confirm_messages, BOOKING_CONFIRM_PROMPT.format(
-        booking_summary=booking_summary
-    ), temperature=0.6)
-
+    reply = chat_completion(
+        confirm_messages,
+        BOOKING_CONFIRM_PROMPT.format(booking_summary=booking_summary),
+        temperature=0.6
+    )
     return reply, booking.model_dump()

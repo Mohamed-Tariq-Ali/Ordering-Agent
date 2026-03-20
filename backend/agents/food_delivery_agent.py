@@ -58,6 +58,26 @@ Keep it brief and friendly. Use emojis.
 """
 
 
+def _recover_restaurant_from_history(conversation_history: list) -> dict | None:
+    """Scan recent conversation to recover selected restaurant name if lost from frontend state."""
+    patterns = [
+        r'restaurant selected[:\s*]+([^\n*.<>]+)',
+        r'you selected\s+\*{0,2}([^\n*.<>]+?)\*{0,2}[.\n]',
+        r'ordering from\s+\*{0,2}([^\n*.<>]+?)\*{0,2}',
+        r'order from\s+\*{0,2}([^\n*.<>]+?)\*{0,2}',
+        r'great choice.*?you selected\s+\*{0,2}([^\n*.<>]+?)\*{0,2}',
+    ]
+    for msg in reversed(conversation_history[-12:]):
+        content = msg.get("content", "")
+        for pattern in patterns:
+            m = re.search(pattern, content, re.IGNORECASE)
+            if m:
+                name = m.group(1).strip().rstrip(".,!?")
+                if name:
+                    return {"name": name}
+    return None
+
+
 async def handle_food_search(message: str, conversation_history: list,
                               user_location: dict | None) -> tuple[str, list]:
     """Search for nearby restaurants."""
@@ -144,11 +164,15 @@ async def handle_food_search(message: str, conversation_history: list,
 
 async def handle_food_order(message: str, conversation_history: list,
                              user_location: dict | None,
-                             selected_restaurant: dict | None) -> tuple[str, dict | None]:
+                             selected_restaurant: dict | None,
+                             username: str | None = None) -> tuple[str, dict | None]:
     """Place a food order from a selected restaurant."""
     if not user_location:
         return "Please share your location first using the 📍 button so I can confirm delivery! 😊", None
 
+    # If selected_restaurant lost from frontend state, recover from conversation history
+    if not selected_restaurant:
+        selected_restaurant = _recover_restaurant_from_history(conversation_history)
     if not selected_restaurant:
         return "Please tell me which restaurant you'd like to order from first! 🍽️", None
 
@@ -197,26 +221,26 @@ async def handle_food_order(message: str, conversation_history: list,
             selected_restaurant["lat"], selected_restaurant["lng"]
         )
 
-    # Save order
+    # Save order — scoped to logged-in user
     order = Order(
-        customer_name=None,
+        customer_name=username,
         items=order_items,
         total_amount=grand_total,
         status="confirmed",
         notes=f"Delivery from {restaurant_name} | {extracted.get('special_instructions', '')}"
     )
-    save_order(order)
+    save_order(order, username=username)
 
     # Generate confirmation message
-    items_text = "\n".join([f"  - {i.product_name} x{i.quantity} = ₹{i.total_price}" for i in order_items])
+    items_text = "\n".join([f"  - {i.product_name} x{i.quantity} = Rs.{i.total_price}" for i in order_items])
     summary = f"""
 Order ID: {order.order_id}
 Restaurant: {restaurant_name}
 Items:
 {items_text}
-Subtotal: ₹{total}
-Delivery fee: ₹{delivery_fee}
-Grand Total: ₹{grand_total}
+Subtotal: Rs.{total}
+Delivery fee: Rs.{delivery_fee}
+Grand Total: Rs.{grand_total}
 Delivery Distance: {eta_info['distance'] if eta_info else 'N/A'}
 Estimated Delivery Time: {eta_info['duration'] if eta_info else '30-45 mins'}
 Delivery Address: {user_location.get('address', 'Your location')}

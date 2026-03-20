@@ -1,3 +1,14 @@
+// ═══════════════════════════════════════════════════════════
+// OrderBot — app.js
+// All 6 Input Roles integrated:
+//   5.2 Context (External Knowledge) — pre-fetch indicator
+//   5.3 Memory (short/long/episodic) — sidebar panels
+//   5.5 Environment/Runtime Context  — live env grid
+//   5.6 System Instructions/Policies — guardrail indicator
+//   5.5 Interaction State            — state bar / slot filling
+//   A2A Agent-to-Agent Messages      — handoff log
+// ═══════════════════════════════════════════════════════════
+
 // ─── State ────────────────────────────────────────────────
 const SESSION_ID = 'sess_' + Math.random().toString(36).slice(2, 10);
 let conversationHistory = [];
@@ -7,35 +18,303 @@ let selectedRestaurant = null;
 let selectedHotel = null;
 
 // ─── DOM refs ─────────────────────────────────────────────
-const chatMessages    = document.getElementById('chatMessages');
-const userInput       = document.getElementById('userInput');
-const sendBtn         = document.getElementById('sendBtn');
-const clearBtn        = document.getElementById('clearBtn');
-const menuBtn         = document.getElementById('menuBtn');
-const orderContainer  = document.getElementById('orderCardContainer');
-const orderCardBody   = document.getElementById('orderCardBody');
-const closeCard       = document.getElementById('closeCard');
-const sidebar         = document.getElementById('sidebar');
-const getLocationBtn  = document.getElementById('getLocationBtn');
-const locIconBtn      = document.getElementById('locIconBtn');
-const locationDisplay = document.getElementById('locationDisplay');
-const mapPanel        = document.getElementById('mapPanel');
-const mapIframe       = document.getElementById('mapIframe');
-const closeMap        = document.getElementById('closeMap');
-const historyBtn      = document.getElementById('historyBtn');
-const historyPanel    = document.getElementById('historyPanel');
-const historyBody     = document.getElementById('historyBody');
-const closeHistory    = document.getElementById('closeHistory');
+const chatMessages       = document.getElementById('chatMessages');
+const userInput          = document.getElementById('userInput');
+const sendBtn            = document.getElementById('sendBtn');
+const clearBtn           = document.getElementById('clearBtn');
+const menuBtn            = document.getElementById('menuBtn');
+const orderContainer     = document.getElementById('orderCardContainer');
+const orderCardBody      = document.getElementById('orderCardBody');
+const closeCard          = document.getElementById('closeCard');
+const sidebar            = document.getElementById('sidebar');
+const getLocationBtn     = document.getElementById('getLocationBtn');
+const locIconBtn         = document.getElementById('locIconBtn');
+const locationDisplay    = document.getElementById('locationDisplay');
+const mapPanel           = document.getElementById('mapPanel');
+const mapIframe          = document.getElementById('mapIframe');
+const closeMap           = document.getElementById('closeMap');
+const historyBtn         = document.getElementById('historyBtn');
+const historyPanel       = document.getElementById('historyPanel');
+const historyBody        = document.getElementById('historyBody');
+const closeHistory       = document.getElementById('closeHistory');
 
-// ─── Init ─────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
-  addBotMessage(
-    "👋 Hey! I'm **OrderBot** — your smart assistant.\n\nI can help you:\n• 🛍️ Browse & order products\n• 🍽️ Find nearby restaurants & order food\n• 🏨 Search & book hotel rooms\n• 📦 Track or cancel orders\n• 🧾 View order history\n\nTip: Click **📍** to share your location!",
-    "greeting"
-  );
+// Input role DOM refs
+const envTime            = document.getElementById('envTime');
+const envZone            = document.getElementById('envZone');
+const envDevice          = document.getElementById('envDevice');
+const envSession         = document.getElementById('envSession');
+const memoryToggle       = document.getElementById('memoryToggle');
+const memoryBody         = document.getElementById('memoryBody');
+const stateBar           = document.getElementById('stateBar');
+const stateSlots         = document.getElementById('stateSlots');
+const stateClose         = document.getElementById('stateClose');
+const guardrailIndicator = document.getElementById('guardrailIndicator');
+const contextBar         = document.getElementById('contextBar');
+const contextText        = document.getElementById('contextText');
+const contextClose       = document.getElementById('contextClose');
+const agentLog           = document.getElementById('agentLog');
+const agentLogBody       = document.getElementById('agentLogBody');
+const agentLogClose      = document.getElementById('agentLogClose');
+
+// ═══════════════════════════════════════════════════════════
+// 5.5 ENVIRONMENT / RUNTIME CONTEXT — auto-detect + send
+// ═══════════════════════════════════════════════════════════
+
+function detectAndSendEnv() {
+  const tz     = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+  const locale = navigator.language || 'en-IN';
+  const device = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
+
+  const env = { session_id: SESSION_ID, timezone: tz, locale, device, platform: 'web' };
+
+  updateEnvGrid(tz, device);
+
+  fetch('/api/env', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(env)
+  }).catch(() => {});
+}
+
+function updateEnvGrid(tz, device) {
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit',
+    timeZone: tz, hour12: false
+  });
+  envTime.textContent    = timeStr;
+  envZone.textContent    = tz.split('/').pop().replace('_', ' ');
+  envDevice.textContent  = device || 'web';
+  envSession.textContent = SESSION_ID.slice(5, 11);
+}
+
+function startEnvClock() {
+  const tz     = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+  const device = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
+  setInterval(() => updateEnvGrid(tz, device), 30000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 5.3 MEMORY — fetch and render sidebar panels
+// ═══════════════════════════════════════════════════════════
+
+async function fetchAndRenderMemory() {
+  try {
+    const res = await fetch(`/api/memory/${SESSION_ID}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderShortTermMemory(data.short_term || []);
+    renderLongTermMemory(data.long_term_preferences || {});
+    renderEpisodicMemory(data.episodic || []);
+  } catch (e) {}
+}
+
+function renderShortTermMemory(turns) {
+  const el = document.getElementById('memShort');
+  if (!turns.length) {
+    el.innerHTML = '<p class="mem-empty">No messages yet</p>';
+    return;
+  }
+  el.innerHTML = turns.slice(-8).map(t => `
+    <div class="mem-entry">
+      <span class="mem-role ${t.role}">${t.role}</span>
+      <div>${escapeHtml(t.content.slice(0, 60))}${t.content.length > 60 ? '…' : ''}</div>
+    </div>`).join('');
+}
+
+function renderLongTermMemory(prefs) {
+  const el = document.getElementById('memLong');
+  const entries = Object.entries(prefs);
+  if (!entries.length) {
+    el.innerHTML = '<p class="mem-empty">No preferences stored</p>';
+    return;
+  }
+  el.innerHTML = entries.map(([k, v]) => `
+    <div class="mem-pref">
+      <span class="mem-pref-key">${escapeHtml(k)}</span>
+      <span class="mem-pref-val">${escapeHtml(String(Array.isArray(v) ? v.join(', ') : v).slice(0, 20))}</span>
+    </div>`).join('');
+}
+
+function renderEpisodicMemory(episodes) {
+  const el = document.getElementById('memEpisodic');
+  if (!episodes.length) {
+    el.innerHTML = '<p class="mem-empty">No task history yet</p>';
+    return;
+  }
+  el.innerHTML = episodes.slice(-5).map(ep => `
+    <div class="mem-episode">
+      <span class="ep-agent">[${ep.agent}]</span>
+      <div>${escapeHtml((ep.task || '').slice(0, 50))}${(ep.task || '').length > 50 ? '…' : ''}</div>
+      <span class="ep-outcome">→ ${ep.outcome}</span>
+    </div>`).join('');
+}
+
+document.querySelectorAll('.mem-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.mem-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.tab;
+    document.getElementById('memShort').classList.toggle('hidden', target !== 'short');
+    document.getElementById('memLong').classList.toggle('hidden', target !== 'long');
+    document.getElementById('memEpisodic').classList.toggle('hidden', target !== 'episodic');
+  });
 });
 
-// ─── Location ─────────────────────────────────────────────
+memoryToggle.addEventListener('click', () => {
+  memoryBody.classList.toggle('collapsed');
+  memoryToggle.classList.toggle('collapsed');
+});
+
+// ═══════════════════════════════════════════════════════════
+// 5.6 GUARDRAIL INDICATOR
+// ═══════════════════════════════════════════════════════════
+
+function setGuardrailViolated(violated) {
+  if (violated) {
+    guardrailIndicator.classList.add('violated');
+    guardrailIndicator.querySelector('.guardrail-label').textContent = 'Blocked';
+    setTimeout(() => {
+      guardrailIndicator.classList.remove('violated');
+      guardrailIndicator.querySelector('.guardrail-label').textContent = 'Policies Active';
+    }, 4000);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 5.5 INTERACTION STATE BAR (Dialogue Control / Slot Filling)
+// ═══════════════════════════════════════════════════════════
+
+const WORKFLOW_SLOTS = {
+  hotel_booking: [
+    { key: 'hotel',    label: 'Hotel' },
+    { key: 'room',     label: 'Room' },
+    { key: 'check_in', label: 'Check-in' },
+    { key: 'check_out',label: 'Check-out' },
+    { key: 'guests',   label: 'Guests' },
+  ],
+  food_delivery: [
+    { key: 'restaurant', label: 'Restaurant' },
+    { key: 'items',      label: 'Items' },
+  ],
+  order_booking: [
+    { key: 'items',  label: 'Items' },
+    { key: 'total',  label: 'Total' },
+  ],
+};
+
+let currentSlotState = {};
+
+function updateStateBar(agentUsed, replyText) {
+  const slots = WORKFLOW_SLOTS[agentUsed];
+  if (!slots) { stateBar.style.display = 'none'; return; }
+
+  if (agentUsed === 'hotel_booking') {
+    if (selectedHotel) currentSlotState.hotel = selectedHotel.name;
+    if (/standard|deluxe|suite|executive/i.test(replyText)) {
+      const m = replyText.match(/\b(standard|deluxe|suite|executive)\b/i);
+      if (m) currentSlotState.room = m[1];
+    }
+    if (/check.in/i.test(replyText)) {
+      const m = replyText.match(/Check-in[:\s]+([^\n<br>]+)/i);
+      if (m) currentSlotState.check_in = m[1].trim().slice(0,10);
+    }
+    if (/check.out/i.test(replyText)) {
+      const m = replyText.match(/Check-out[:\s]+([^\n<br>]+)/i);
+      if (m) currentSlotState.check_out = m[1].trim().slice(0,10);
+    }
+    if (/guests?[:\s]+(\d+)/i.test(replyText)) {
+      currentSlotState.guests = replyText.match(/guests?[:\s]+(\d+)/i)[1];
+    }
+  }
+
+  if (agentUsed === 'food_delivery') {
+    if (selectedRestaurant) currentSlotState.restaurant = selectedRestaurant.name;
+    if (/order confirmed/i.test(replyText)) currentSlotState.items = '✓';
+  }
+
+  if (agentUsed === 'order_booking') {
+    if (/total[:\s]+₹([\d.]+)/i.test(replyText)) {
+      currentSlotState.total = '₹' + replyText.match(/total[:\s]+₹([\d.]+)/i)[1];
+    }
+    if (/items?[:\s]+([^\n]+)/i.test(replyText)) {
+      currentSlotState.items = '✓';
+    }
+  }
+
+  stateSlots.innerHTML = slots.map(s => {
+    const val = currentSlotState[s.key];
+    const cls = val ? 'filled' : 'waiting';
+    return `
+      <div class="state-slot ${cls}">
+        <span class="slot-key">${s.label}</span>
+        <span class="slot-val ${cls}">${val || '?'}</span>
+      </div>`;
+  }).join('');
+
+  stateBar.style.display = 'block';
+}
+
+stateClose.addEventListener('click', () => {
+  stateBar.style.display = 'none';
+  currentSlotState = {};
+});
+
+// ═══════════════════════════════════════════════════════════
+// A2A AGENT-TO-AGENT HANDOFF LOG
+// ═══════════════════════════════════════════════════════════
+
+let lastAgent = null;
+
+function logAgentHop(fromAgent, toAgent, hopType = 'route') {
+  if (!fromAgent || fromAgent === toAgent) return;
+
+  agentLog.style.display = 'block';
+  const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  const hop = document.createElement('div');
+  hop.className = 'agent-hop';
+  hop.innerHTML = `
+    <span class="agent-hop-from">${fromAgent}</span>
+    <span class="agent-hop-arrow">→</span>
+    <span class="agent-hop-to">${toAgent}</span>
+    <span class="agent-hop-type">${hopType}</span>
+    <span class="agent-hop-time">${now}</span>`;
+
+  agentLogBody.appendChild(hop);
+  agentLogBody.scrollTop = agentLogBody.scrollHeight;
+
+  const hops = agentLogBody.querySelectorAll('.agent-hop');
+  if (hops.length > 10) hops[0].remove();
+}
+
+agentLogClose.addEventListener('click', () => { agentLog.style.display = 'none'; });
+
+// ═══════════════════════════════════════════════════════════
+// 5.2 CONTEXT PRE-FETCH INDICATOR
+// ═══════════════════════════════════════════════════════════
+
+const CONTEXT_KEYWORDS = [
+  'cancel', 'status', 'order', 'last order', 'track',
+  'hotel', 'booking', 'history', 'my order', 'recent'
+];
+
+function maybeShowContextBar(message) {
+  const lower = message.toLowerCase();
+  const matched = CONTEXT_KEYWORDS.find(kw => lower.includes(kw));
+  if (matched) {
+    contextText.textContent = `Fetching context: ${matched} records from DB...`;
+    contextBar.style.display = 'flex';
+    setTimeout(() => { contextBar.style.display = 'none'; }, 3000);
+  }
+}
+
+contextClose.addEventListener('click', () => { contextBar.style.display = 'none'; });
+
+// ═══════════════════════════════════════════════════════════
+// LOCATION
+// ═══════════════════════════════════════════════════════════
+
 function requestLocation() {
   if (!navigator.geolocation) {
     addBotMessage("⚠️ Your browser doesn't support GPS. Try Chrome or Firefox.", "error");
@@ -70,18 +349,14 @@ function requestLocation() {
         getLocationBtn.textContent = "Update Location";
         getLocationBtn.disabled = false;
         locIconBtn.classList.add('active');
-        addBotMessage(`📍 Location captured! You can now search restaurants and hotels nearby!`, "location_agent");
+        addBotMessage(`📍 Location captured!`, "location_agent");
       }
     },
     (err) => {
       getLocationBtn.disabled = false;
       getLocationBtn.textContent = "Share My Location";
       locIconBtn.textContent = "📍";
-      const msgs = {
-        1: "Location access denied. Please allow location in browser settings.",
-        2: "Location unavailable. Make sure GPS is on.",
-        3: "Location timed out. Please try again."
-      };
+      const msgs = { 1: "Location access denied.", 2: "Location unavailable.", 3: "Location timed out." };
       addBotMessage(`⚠️ ${msgs[err.code] || "Couldn't get location."}`, "error");
     },
     { timeout: 10000, enableHighAccuracy: true }
@@ -91,7 +366,10 @@ function requestLocation() {
 getLocationBtn.addEventListener('click', requestLocation);
 locIconBtn.addEventListener('click', requestLocation);
 
-// ─── Quick buttons ────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// QUICK BUTTONS
+// ═══════════════════════════════════════════════════════════
+
 document.querySelectorAll('.quick-btn[data-msg]').forEach(btn => {
   btn.addEventListener('click', () => {
     const msg = btn.getAttribute('data-msg');
@@ -99,22 +377,21 @@ document.querySelectorAll('.quick-btn[data-msg]').forEach(btn => {
   });
 });
 
-// ─── Order History ────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// ORDER HISTORY
+// ═══════════════════════════════════════════════════════════
+
 historyBtn.addEventListener('click', async () => {
   if (historyPanel.style.display !== 'none') {
-    historyPanel.style.display = 'none';
-    return;
+    historyPanel.style.display = 'none'; return;
   }
   historyBody.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:4px">Loading...</p>';
   historyPanel.style.display = 'flex';
   try {
     const [ordersResp, bookingsResp] = await Promise.all([
-      fetch('/api/orders'),
-      fetch('/api/hotel-bookings')
+      fetch('/api/orders'), fetch('/api/hotel-bookings')
     ]);
-    const orders   = await ordersResp.json();
-    const bookings = await bookingsResp.json();
-    renderHistoryPanel(orders, bookings);
+    renderHistoryPanel(await ordersResp.json(), await bookingsResp.json());
   } catch (e) {
     historyBody.innerHTML = '<p style="color:var(--danger);font-size:12px;padding:4px">Failed to load history.</p>';
   }
@@ -124,7 +401,6 @@ closeHistory.addEventListener('click', () => { historyPanel.style.display = 'non
 
 function renderHistoryPanel(orders, bookings = []) {
   let html = '';
-
   if (orders && orders.length > 0) {
     html += `<p class="history-section-label">🛍️ Orders</p>`;
     html += orders.map(o => {
@@ -132,44 +408,35 @@ function renderHistoryPanel(orders, bookings = []) {
       const items = o.items.map(i => `${i.product_name} ×${i.quantity}`).join(', ');
       const time = o.created_at.slice(0, 16).replace('T', ' ');
       const type = o.notes && o.notes.includes('Delivery from') ? '🍽️' : '🛍️';
-      return `
-        <div class="history-item">
-          <div class="history-item-id">${type} ${o.order_id}</div>
-          <div class="history-item-meta">
-            <span class="${statusClass}">● ${o.status.toUpperCase()}</span><br>
-            ${items}<br>
-            ₹${o.total_amount} · ${time}
-          </div>
-        </div>`;
+      return `<div class="history-item">
+        <div class="history-item-id">${type} ${o.order_id}</div>
+        <div class="history-item-meta">
+          <span class="${statusClass}">● ${o.status.toUpperCase()}</span><br>
+          ${items}<br>₹${o.total_amount} · ${time}
+        </div></div>`;
     }).join('');
   }
-
   if (bookings && bookings.length > 0) {
     html += `<p class="history-section-label">🏨 Hotel Bookings</p>`;
     html += bookings.map(b => {
-      const statusClass = `history-status-${b.status}`;
-      return `
-        <div class="history-item">
-          <div class="history-item-id">🏨 ${b.booking_id}</div>
-          <div class="history-item-meta">
-            <span class="${statusClass}">● ${b.status.toUpperCase()}</span><br>
-            ${b.hotel_name}<br>
-            ${b.check_in} → ${b.check_out} · ${b.total_nights} night(s)<br>
-            ${b.guests} guest(s) · ${b.room_type}<br>
-            ₹${b.estimated_price}
-          </div>
-        </div>`;
+      return `<div class="history-item">
+        <div class="history-item-id">🏨 ${b.booking_id}</div>
+        <div class="history-item-meta">
+          <span class="history-status-${b.status}">● ${b.status.toUpperCase()}</span><br>
+          ${b.hotel_name}<br>${b.check_in} → ${b.check_out}<br>
+          ${b.total_nights} night(s) · ${b.guests} guest(s) · ${b.room_type}<br>
+          ₹${b.estimated_price}
+        </div></div>`;
     }).join('');
   }
-
-  if (!html) {
-    html = '<p style="color:var(--text-muted);font-size:13px;padding:4px">No history yet.</p>';
-  }
-
+  if (!html) html = '<p style="color:var(--text-muted);font-size:13px;padding:4px">No history yet.</p>';
   historyBody.innerHTML = html;
 }
 
-// ─── Input events ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// INPUT EVENTS
+// ═══════════════════════════════════════════════════════════
+
 userInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!isWaiting) sendMessage(); }
 });
@@ -183,7 +450,10 @@ closeCard.addEventListener('click', () => { orderContainer.style.display = 'none
 closeMap.addEventListener('click', () => { mapPanel.style.display = 'none'; });
 menuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
 
-// ─── Send message ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// SEND MESSAGE
+// ═══════════════════════════════════════════════════════════
+
 async function sendMessage() {
   const text = userInput.value.trim();
   if (!text) return;
@@ -193,8 +463,17 @@ async function sendMessage() {
   userInput.value = '';
   userInput.style.height = 'auto';
 
+  maybeShowContextBar(text);
+
   const typingEl = showTyping();
   setWaiting(true);
+
+  const env = {
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
+    locale: navigator.language || 'en-IN',
+    device: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+    platform: 'web',
+  };
 
   try {
     const response = await fetch('/api/chat', {
@@ -206,7 +485,8 @@ async function sendMessage() {
         conversation_history: conversationHistory.slice(-12),
         location: userLocation,
         selected_restaurant: selectedRestaurant,
-        selected_hotel: selectedHotel
+        selected_hotel: selectedHotel,
+        environment: env,
       })
     });
 
@@ -217,8 +497,15 @@ async function sendMessage() {
 
     const data = await response.json();
     typingEl.remove();
+    contextBar.style.display = 'none';
 
-    addBotMessage(data.reply, data.agent_used);
+    if (data.agent_used === 'guardrail') setGuardrailViolated(true);
+
+    logAgentHop(lastAgent || 'user', data.agent_used, 'route');
+    lastAgent = data.agent_used;
+
+    addBotMessage(data.reply, data.agent_used, data.context_injected);
+    updateStateBar(data.agent_used, data.reply);
     conversationHistory.push({ role: 'assistant', content: data.reply });
 
     if (data.restaurants && data.restaurants.length > 0) showRestaurantCards(data.restaurants);
@@ -227,25 +514,31 @@ async function sendMessage() {
       mapIframe.src = data.map_embed_url;
       mapPanel.style.display = 'block';
     }
+
+    // ── Card rendering — order matters, check both, show correct one ──────
     if (data.order) showOrderCard(data.order);
     if (data.hotel_booking) showHotelBookingCard(data.hotel_booking);
+
     if (data.orders_list || data.hotel_bookings_list) {
-  renderHistoryPanel(
-    data.orders_list || [],
-    data.hotel_bookings_list || []
-  );
-  historyPanel.style.display = 'flex';
-}
+      renderHistoryPanel(data.orders_list || [], data.hotel_bookings_list || []);
+      historyPanel.style.display = 'flex';
+    }
+
+    fetchAndRenderMemory();
 
   } catch (err) {
     typingEl.remove();
+    contextBar.style.display = 'none';
     addBotMessage(`⚠️ Error: **${err.message}**`, 'error');
   } finally {
     setWaiting(false);
   }
 }
 
-// ─── Render helpers ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// RENDER HELPERS
+// ═══════════════════════════════════════════════════════════
+
 function addUserMessage(text) {
   const el = document.createElement('div');
   el.className = 'message user';
@@ -254,16 +547,18 @@ function addUserMessage(text) {
   scrollToBottom();
 }
 
-function addBotMessage(text, agentUsed = '') {
+function addBotMessage(text, agentUsed = '', contextInjected = false) {
   const el = document.createElement('div');
   el.className = 'message bot';
   const badge = agentUsed && agentUsed !== 'greeting' && agentUsed !== 'error'
     ? `<div class="agent-badge">agent: ${agentUsed}</div>` : '';
+  const ctxBadge = contextInjected
+    ? `<span class="context-badge">⚡ context injected</span>` : '';
   el.innerHTML = `
     <div class="msg-avatar">🤖</div>
     <div>
       <div class="msg-bubble">${formatMarkdown(text)}</div>
-      ${badge}
+      <div>${badge}${ctxBadge}</div>
     </div>`;
   chatMessages.appendChild(el);
   scrollToBottom();
@@ -301,10 +596,12 @@ function showRestaurantCards(restaurants) {
     btn.addEventListener('click', (e) => {
       const idx = parseInt(e.target.dataset.index);
       selectedRestaurant = restaurants[idx];
+      currentSlotState = { restaurant: selectedRestaurant.name };
       document.querySelectorAll('.result-card').forEach(c => c.classList.remove('selected'));
       e.target.closest('.result-card').classList.add('selected');
-      addBotMessage(`Great choice! 🍽️ You selected **${selectedRestaurant.name}**.\n\nWhat would you like to order? e.g. "1 Biryani and 2 Pepsi"`, 'food_order');
+      addBotMessage(`Great choice! 🍽️ You selected **${selectedRestaurant.name}**.\n\nWhat would you like to order? e.g. "1 Biryani and 2 Pepsi"`, 'food_delivery');
       conversationHistory.push({ role: 'assistant', content: `Restaurant selected: ${selectedRestaurant.name}` });
+      updateStateBar('food_delivery', '');
     });
   });
 }
@@ -344,6 +641,7 @@ function showHotelCards(hotels) {
     btn.addEventListener('click', (e) => {
       const idx = parseInt(e.target.dataset.index);
       selectedHotel = hotels[idx];
+      currentSlotState = { hotel: selectedHotel.name };
       document.querySelectorAll('.result-card').forEach(c => c.classList.remove('selected'));
       e.target.closest('.result-card').classList.add('selected');
       addBotMessage(
@@ -351,11 +649,15 @@ function showHotelCards(hotels) {
         'hotel_booking'
       );
       conversationHistory.push({ role: 'assistant', content: `Hotel selected: ${selectedHotel.name}` });
+      updateStateBar('hotel_booking', '');
     });
   });
 }
 
 function showOrderCard(order) {
+  // Always reset header to food/product order title
+  orderContainer.querySelector('.order-card-header span').textContent = '✅ Order Confirmed';
+
   const items = order.items.map(i =>
     `  ${i.product_name} × ${i.quantity}    ₹${i.total_price.toFixed(2)}`
   ).join('\n');
@@ -368,49 +670,65 @@ function showOrderCard(order) {
     <div><strong>Order ID:</strong> ${order.order_id}</div>
     <div><strong>Status:</strong> ${order.status}</div>
     ${extra}
-    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
-    <pre style="white-space:pre-wrap;font-size:12px">${items}</pre>
-    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:8px 0">
+    <pre style="white-space:pre-wrap;font-size:11px">${items}</pre>
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:8px 0">
     <div><strong>Total:</strong> ₹${(order.grand_total || order.total_amount).toFixed(2)}</div>
-    <div style="margin-top:6px;font-size:11px;opacity:0.5">${order.created_at.slice(0,16).replace('T',' ')}</div>`;
+    <div style="margin-top:5px;font-size:10px;opacity:0.5">${order.created_at.slice(0,16).replace('T',' ')}</div>`;
   orderContainer.style.display = 'block';
   orderContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  stateBar.style.display = 'none';
+  currentSlotState = {};
 }
 
 function showHotelBookingCard(booking) {
+  // Always reset header to hotel booking title first
+  orderContainer.querySelector('.order-card-header span').textContent = '🏨 Room Booked';
+
   orderCardBody.innerHTML = `
     <div><strong>Booking ID:</strong> ${booking.booking_id}</div>
     <div><strong>Hotel:</strong> ${booking.hotel_name}</div>
     ${booking.hotel_address ? `<div><strong>Address:</strong> ${booking.hotel_address}</div>` : ''}
     <div><strong>Status:</strong> ${booking.status}</div>
-    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:8px 0">
     <div><strong>Room Type:</strong> ${booking.room_type}</div>
     <div><strong>Check-in:</strong> ${booking.check_in}</div>
     <div><strong>Check-out:</strong> ${booking.check_out}</div>
     <div><strong>Nights:</strong> ${booking.total_nights}</div>
     <div><strong>Guests:</strong> ${booking.guests}</div>
     <div><strong>Rooms:</strong> ${booking.rooms}</div>
-    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:8px 0">
     <div><strong>Est. Total:</strong> ₹${booking.estimated_price}</div>
-    <div style="margin-top:6px;font-size:11px;opacity:0.7;color:#facc15">
-      ⚠️ Please contact the hotel to confirm actual availability.
+    <div style="margin-top:5px;font-size:10px;opacity:0.6;color:#facc15">
+      ⚠️ Contact the hotel to confirm actual availability.
     </div>
-    <div style="margin-top:4px;font-size:11px;opacity:0.5">${booking.created_at.slice(0,16).replace('T',' ')}</div>`;
-  orderContainer.querySelector('.order-card-header span').textContent = '🏨 Room Booked';
+    <div style="margin-top:4px;font-size:10px;opacity:0.4">${booking.created_at.slice(0,16).replace('T',' ')}</div>`;
   orderContainer.style.display = 'block';
   orderContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  stateBar.style.display = 'none';
+  currentSlotState = {};
 }
+
+// ═══════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════
 
 function clearChat() {
   chatMessages.innerHTML = '';
   conversationHistory = [];
   selectedRestaurant = null;
   selectedHotel = null;
+  lastAgent = null;
+  currentSlotState = {};
   orderContainer.style.display = 'none';
   mapPanel.style.display = 'none';
   historyPanel.style.display = 'none';
+  stateBar.style.display = 'none';
+  agentLog.style.display = 'none';
+  agentLogBody.innerHTML = '';
   orderContainer.querySelector('.order-card-header span').textContent = '✅ Order Confirmed';
   addBotMessage("Chat cleared! How can I help you? 😊", "greeting");
+  fetchAndRenderMemory();
 }
 
 function showTyping() {
@@ -454,3 +772,48 @@ function formatMarkdown(text) {
     .replace(/^[•\-] (.+)$/gm, '<li>$1</li>')
     .replace(/\n/g, '<br>');
 }
+
+
+// ═══════════════════════════════════════════════════════════
+// LOGOUT + USERNAME DISPLAY
+// ═══════════════════════════════════════════════════════════
+
+async function fetchAndShowUsername() {
+  try {
+    const res = await fetch('/auth/me');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.username) {
+      document.getElementById('usernameDisplay').textContent = data.username;
+      document.getElementById('userChip').style.display = 'flex';
+    }
+  } catch (e) {}
+}
+
+async function handleLogout() {
+  const btn = document.getElementById('logoutBtn');
+  btn.textContent = '⏻ Logging out...';
+  btn.style.pointerEvents = 'none';
+  try {
+    await fetch('/auth/logout', { method: 'POST' });
+  } catch (e) {}
+  window.location.href = '/login';
+}
+
+document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+
+window.addEventListener('DOMContentLoaded', () => {
+  detectAndSendEnv();
+  startEnvClock();
+  fetchAndRenderMemory();
+  fetchAndShowUsername();
+
+  addBotMessage(
+    "👋 Hey! I'm **OrderBot** — your smart assistant.\n\nI can help you:\n• 🛍️ Browse & order products\n• 🍽️ Find nearby restaurants & order food\n• 🏨 Search & book hotel rooms\n• 📦 Track or cancel orders\n• 🧾 View order history\n\nTip: Click **📍** to share your location!",
+    "greeting"
+  );
+});

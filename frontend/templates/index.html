@@ -5,23 +5,68 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>OrderBot — Smart Order Assistant</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css" />
+  <style>
+    /* ── Logout button ── */
+    .logout-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: rgba(248, 113, 113, 0.08);
+      border: 1px solid rgba(248, 113, 113, 0.25);
+      border-radius: 8px;
+      color: #f87171;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: 'Space Grotesk', sans-serif;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    }
+    .logout-btn:hover {
+      background: rgba(248, 113, 113, 0.16);
+      border-color: rgba(248, 113, 113, 0.45);
+      transform: translateY(-1px);
+    }
+    .logout-btn:active { transform: translateY(0); }
+
+    /* ── Username chip in topbar ── */
+    .user-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      background: rgba(124, 106, 255, 0.08);
+      border: 1px solid rgba(124, 106, 255, 0.2);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #a78bfa;
+    }
+  </style>
 </head>
 <body>
 <div class="app-shell">
 
+  <!-- ═══════════════════════════════════════
+       SIDEBAR
+  ═══════════════════════════════════════ -->
   <aside class="sidebar" id="sidebar">
+
+    <!-- Bot Identity -->
     <div class="sidebar-header">
       <div class="bot-avatar">
         <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect width="40" height="40" rx="12" fill="url(#grad)"/>
-          <circle cx="17" cy="18" r="2" fill="white"/>
-          <circle cx="23" cy="18" r="2" fill="white"/>
-          <path d="M16 23c1 1.5 7 1.5 8 0" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-          <defs><linearGradient id="grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#6C63FF"/><stop offset="1" stop-color="#3ECFCF"/>
-          </linearGradient></defs>
+          <circle cx="15" cy="17" r="2.5" fill="white" opacity="0.9"/>
+          <circle cx="25" cy="17" r="2.5" fill="white" opacity="0.9"/>
+          <path d="M14 23c1.5 2.5 10.5 2.5 12 0" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+          <defs>
+            <linearGradient id="grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#6C63FF"/><stop offset="1" stop-color="#3ECFCF"/>
+            </linearGradient>
+          </defs>
         </svg>
       </div>
       <div>
@@ -30,16 +75,76 @@
       </div>
     </div>
 
+    <!-- 5.5 Environment / Runtime Context Panel -->
+    <div class="env-panel" id="envPanel">
+      <div class="panel-label">
+        <span class="panel-icon">🌐</span>
+        <span>Runtime Context</span>
+        <span class="badge-live">LIVE</span>
+      </div>
+      <div class="env-grid">
+        <div class="env-item">
+          <span class="env-key">Time</span>
+          <span class="env-val" id="envTime">--:--</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">Zone</span>
+          <span class="env-val" id="envZone">detecting...</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">Device</span>
+          <span class="env-val" id="envDevice">--</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">Session</span>
+          <span class="env-val" id="envSession">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5.3 Memory Panel -->
+    <div class="memory-panel" id="memoryPanel">
+      <div class="panel-label">
+        <span class="panel-icon">🧠</span>
+        <span>Memory</span>
+        <button class="panel-toggle" id="memoryToggle">▾</button>
+      </div>
+      <div class="memory-body" id="memoryBody">
+        <div class="memory-tabs">
+          <button class="mem-tab active" data-tab="short">Short-term</button>
+          <button class="mem-tab" data-tab="long">Long-term</button>
+          <button class="mem-tab" data-tab="episodic">Episodic</button>
+        </div>
+        <div class="mem-content" id="memShort">
+          <p class="mem-empty">No messages yet</p>
+        </div>
+        <div class="mem-content hidden" id="memLong">
+          <p class="mem-empty">No preferences stored</p>
+        </div>
+        <div class="mem-content hidden" id="memEpisodic">
+          <p class="mem-empty">No task history yet</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Location Panel -->
     <div class="location-panel" id="locationPanel">
-      <p class="nav-label">📍 Your Location</p>
+      <div class="panel-label">
+        <span class="panel-icon">📍</span>
+        <span>Your Location</span>
+      </div>
       <div class="location-display" id="locationDisplay">
         <span class="loc-text">Not shared yet</span>
       </div>
       <button class="loc-btn" id="getLocationBtn">Share My Location</button>
     </div>
 
+    <!-- Quick Actions -->
     <nav class="quick-actions">
-      <p class="nav-label">Quick Actions</p>
+      <div class="panel-label">
+        <span class="panel-icon">⚡</span>
+        <span>Quick Actions</span>
+      </div>
       <button class="quick-btn" data-msg="Show me all products">🛍️ Browse Products</button>
       <button class="quick-btn" data-msg="Book 2 units of Choco">🍫 Order Choco</button>
       <button class="quick-btn" data-msg="Find restaurants near me">🍽️ Nearby Restaurants</button>
@@ -49,6 +154,7 @@
       <button class="quick-btn" id="historyBtn">🧾 Order History</button>
     </nav>
 
+    <!-- Order History Panel -->
     <div class="history-panel" id="historyPanel" style="display:none">
       <div class="history-header">
         <span>🧾 Order History</span>
@@ -65,17 +171,51 @@
     </div>
   </aside>
 
+  <!-- ═══════════════════════════════════════
+       MAIN CHAT
+  ═══════════════════════════════════════ -->
   <main class="chat-main">
+
+    <!-- Top bar -->
     <div class="chat-topbar">
       <div class="topbar-left">
         <button class="menu-btn" id="menuBtn">☰</button>
         <span class="chat-title">Chat</span>
       </div>
-      <button class="clear-btn" id="clearBtn">Clear Chat</button>
+      <div class="topbar-right">
+        <!-- 5.6 Guardrail status indicator -->
+        <div class="guardrail-indicator" id="guardrailIndicator" title="System policies active">
+          <span class="guardrail-dot"></span>
+          <span class="guardrail-label">Policies Active</span>
+        </div>
+
+        <!-- Logged-in user chip -->
+        <div class="user-chip" id="userChip" style="display:none">
+          👤 <span id="usernameDisplay"></span>
+        </div>
+
+        <!-- Logout button -->
+        <button class="logout-btn" id="logoutBtn" title="Sign out">
+          ⏻ Logout
+        </button>
+
+        <button class="clear-btn" id="clearBtn">Clear Chat</button>
+      </div>
     </div>
 
+    <!-- 5.5 Interaction State Bar (Dialogue Control) -->
+    <div class="state-bar" id="stateBar" style="display:none">
+      <div class="state-bar-inner">
+        <span class="state-label">WORKFLOW</span>
+        <div class="state-slots" id="stateSlots"></div>
+        <button class="state-close" id="stateClose">×</button>
+      </div>
+    </div>
+
+    <!-- Messages -->
     <div class="chat-messages" id="chatMessages"></div>
 
+    <!-- Map Panel -->
     <div class="map-panel" id="mapPanel" style="display:none">
       <div class="map-panel-header">
         <span>🗺️ Map View</span>
@@ -84,6 +224,7 @@
       <iframe id="mapIframe" src="" allowfullscreen loading="lazy"></iframe>
     </div>
 
+    <!-- Order Card -->
     <div class="order-card-container" id="orderCardContainer" style="display:none">
       <div class="order-card">
         <div class="order-card-header">
@@ -94,11 +235,28 @@
       </div>
     </div>
 
+    <!-- 6. Agent-to-Agent message log (collapsible) -->
+    <div class="agent-log" id="agentLog" style="display:none">
+      <div class="agent-log-header">
+        <span>🔀 Agent Handoff Log</span>
+        <button class="agent-log-close" id="agentLogClose">×</button>
+      </div>
+      <div class="agent-log-body" id="agentLogBody"></div>
+    </div>
+
+    <!-- Input Area -->
     <div class="chat-input-area">
+      <!-- 5.2 Context pre-fetch indicator -->
+      <div class="context-bar" id="contextBar" style="display:none">
+        <span class="context-icon">⚡</span>
+        <span class="context-text" id="contextText">Fetching context...</span>
+        <span class="context-close" id="contextClose">×</span>
+      </div>
+
       <div class="input-wrapper">
         <button class="loc-icon-btn" id="locIconBtn" title="Share location">📍</button>
         <textarea id="userInput"
-          placeholder="Type your message... e.g. 'Find restaurants near me'"
+          placeholder="Type your message..."
           rows="1" autocomplete="off"></textarea>
         <button class="send-btn" id="sendBtn">
           <svg viewBox="0 0 24 24" fill="none">
